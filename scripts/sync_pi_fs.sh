@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mkdir -p pi-sysroot
+mkdir -p ../pi-sysroot
 
 rsync -avzR --copy-unsafe-links \
   --exclude='/usr/lib/jvm' \
@@ -15,4 +15,4 @@ rsync -avzR --copy-unsafe-links \
   alex@10.0.0.144:/usr/include \
   alex@10.0.0.144:/usr/lib \
   alex@10.0.0.144:/usr/local \
-  pi-sysroot/
+  ../pi-sysroot/

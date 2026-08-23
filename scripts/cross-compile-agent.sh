@@ -9,7 +9,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -v "$PWD":/work \
-  -v "$PWD"/pi-sysroot:/sysroot:ro \
+  -v "$PWD"/../pi-sysroot:/sysroot:ro \
   magpie-cross \
   bash -c '
     cmake -B edge-agent-build -G Ninja \

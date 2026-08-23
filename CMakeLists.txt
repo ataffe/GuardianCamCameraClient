@@ -151,6 +151,7 @@ if(BUILD_TESTING)
             test/test_kalman_filter.cpp
             test/test_byte_tracker.cpp
             test/test_imx500_yolo_parser.cpp
+            test/test_frame_rate.cpp
             test/test_backend_client.cpp
             test/test_bbox_ws_server.cpp
             test/test_ffmpeg_streamer.cpp
