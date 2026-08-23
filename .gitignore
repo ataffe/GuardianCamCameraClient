@@ -76,3 +76,6 @@ config/backend/credentials.json
 .DS_Store
 credentials
 certs
+
+edge-agent-build
+pi-sysroot

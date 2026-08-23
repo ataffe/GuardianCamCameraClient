@@ -42,6 +42,7 @@
 
 #include "tracking/byte_tracker.h"
 #include "parsers/imx500_yolo_parser.h"
+#include "perf/frame_rate.h"
 #include "backend/backend_client.h"
 #include "streaming/bbox_ws_server.h"
 #include "streaming/ffmpeg_streamer.h"
@@ -93,6 +94,27 @@ using byte_track::Vec4;
       cv::Mat i420(h + h / 2, w, CV_8UC1, scratch.data());
       cv::cvtColor(i420, bgr, cv::COLOR_YUV2BGR_I420);
   }
+
+  // --- Frame-rate accounting -------------------------------------------------
+  //
+  // Two rates matter here and they are NOT the same number:
+  //
+  //   * pipeline  - every frame the camera delivers into our callback, i.e. the
+  //                 rate the agent actually moves frames at (encode + JPEG).
+  //   * inference - only the frames the IMX500's NPU ran the network on. The
+  //                 sensor does not fire on every frame, so this is a fraction
+  //                 of the pipeline rate, and it is the rate detection and
+  //                 tracking really run at.
+  //
+  // Both are reported so whichever one is being quoted is the one measured. The
+  // meters themselves live in perf/frame_rate.h; the clock starts on the first
+  // frame rather than at camera start, because the IMX500 firmware upload can
+  // take many seconds on a cold start and folding that dead time into the
+  // average would understate the steady-state rate.
+  //
+  // How often the rolling fps line is logged while running.
+  constexpr auto kFpsLogInterval = seconds(5);
+
   }  // namespace
 
 
@@ -487,15 +509,39 @@ void add_args(argparse::ArgumentParser &parser)
       // Reused per-frame packing buffer; the callback is the only thread here.
       std::vector<uint8_t> jpeg_i420;
 
+      // Frame-rate instrumentation. Only the PostProcessor's output thread
+      // touches these, and post_processor.Stop() joins that thread before the
+      // summary is read below, so they need no locking.
+      byte_track::RateMeter pipeline_rate;
+      byte_track::RateMeter inference_rate;
+      byte_track::LatencyMeter callback_latency;
+
       // The PostProcessor delivers each request here AFTER the imx500 stage has
       // run, so CnnOutputTensor is present. This runs on the PostProcessor's
       // output thread; it is the only thread touching tracker.
       post_processor.SetCallback([&](CompletedRequestPtr &req) {
+          // Started before any work so that every way out of this callback --
+          // including the early returns further down -- still gets measured.
+          byte_track::ScopedLatency frame_timer(callback_latency);
+
+          const auto frame_start = steady_clock::now();
+          pipeline_rate.count(frame_start);
+          if (pipeline_rate.window_due(frame_start, kFpsLogInterval)) {
+              // Both windows are taken together so the two rates cover the same
+              // slice of time and can be compared directly.
+              spdlog::info("[Perf] pipeline {} | inference {} | callback {}",
+                           pipeline_rate.take_window(frame_start),
+                           inference_rate.take_window(frame_start),
+                           callback_latency.take_window());
+          }
+
           // --- IMX500 inference output (only on frames where the NPU fired) ---
           auto out_ctrl  = req->metadata.get(libcamera::controls::rpi::CnnOutputTensor);
           auto info_ctrl = req->metadata.get(libcamera::controls::rpi::CnnOutputTensorInfo);
 
           if (out_ctrl && info_ctrl) {
+              inference_rate.count(frame_start);
+
               auto objs = byte_track::parse_imx500_detections(
                   out_ctrl->data(),  out_ctrl->size(),
                   info_ctrl->data(), info_ctrl->size(),
@@ -607,6 +653,13 @@ void add_args(argparse::ArgumentParser &parser)
       }
 
       post_processor.Stop();
+      // Stop() joins the output thread, so the callback can no longer run and
+      // the meters are safe to read. Logged here, before the camera teardown
+      // below, so the numbers are the last thing between the run and the exit.
+      spdlog::info("[Perf] Pipeline over the whole run: {}", pipeline_rate.summary());
+      spdlog::info("[Perf] Inference over the whole run: {}", inference_rate.summary());
+      spdlog::info("[Perf] Callback time per frame over the whole run: {}",
+                   callback_latency.summary());
       // Before StopCamera, and before the sinks below go away: destroying the
       // tee joins the encoder's threads, so no sink can be called afterwards,
       // and releases the camera buffers it was still holding.

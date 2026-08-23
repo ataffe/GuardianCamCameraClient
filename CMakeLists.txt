@@ -77,6 +77,20 @@ if(BUILD_CAMERA_APP)
             message(FATAL_ERROR "libboost_program_options not found")
     endif()
 
+    # rpicam-apps' headers and shared library. Locate them with find_* rather than
+    # hardcoding /usr/... so a cross build resolves them inside CMAKE_FIND_ROOT_PATH
+    # (the Pi sysroot) instead of against the build host's filesystem.
+    find_path(RPICAM_APPS_INCLUDE_DIR
+            NAMES core/rpicam_app.hpp
+            PATH_SUFFIXES rpicam-apps)
+    if(NOT RPICAM_APPS_INCLUDE_DIR)
+            message(FATAL_ERROR "rpicam-apps headers not found")
+    endif()
+    find_library(RPICAM_APP_LIB NAMES rpicam_app)
+    if(NOT RPICAM_APP_LIB)
+            message(FATAL_ERROR "librpicam_app not found")
+    endif()
+
     include(FetchContent)
     FetchContent_Declare(
             argparse
@@ -93,7 +107,7 @@ if(BUILD_CAMERA_APP)
             src/streaming/video_clip_recorder.cpp)
     target_include_directories(magpiecam_edge_agent PRIVATE
             include
-            /usr/include/rpicam-apps)
+            ${RPICAM_APPS_INCLUDE_DIR})
     target_compile_options(magpiecam_edge_agent PRIVATE
             ${LIBCAMERA_CFLAGS} ${OPENCV_CFLAGS})
     # Link only the OpenCV modules actually used (imgproc, imgcodecs) rather than
@@ -103,7 +117,7 @@ if(BUILD_CAMERA_APP)
     # the link with undefined `curl_*@CURL_OPENSSL_4` references.
     target_link_libraries(magpiecam_edge_agent PRIVATE
             bytetrack
-            rpicam_app # the rpicam-apps shared library
+            ${RPICAM_APP_LIB} # the rpicam-apps shared library
             argparse
             backend_client
             spdlog::spdlog
@@ -137,6 +151,7 @@ if(BUILD_TESTING)
             test/test_kalman_filter.cpp
             test/test_byte_tracker.cpp
             test/test_imx500_yolo_parser.cpp
+            test/test_frame_rate.cpp
             test/test_backend_client.cpp
             test/test_bbox_ws_server.cpp
             test/test_ffmpeg_streamer.cpp
