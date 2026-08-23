@@ -13,7 +13,44 @@ rules evaluation and trigger push notifications when a rule is fired.
 [MagPieCam-iOS](https://github.com/ataffe/MagPieCam-iOS) - An iOS app that enables users to receive smart notifications
 based on rules that they set, and video live video from a MagPieCam.
 
-
+### Cross Compiling
+1. Run the following commands on the pi to get the (architecture/os/glibc version)
+```shell
+uname -m          # aarch64 (64-bit) or armv7l (32-bit)
+cat /etc/os-release   # bookworm or trixie
+ldd --version     # glibc version — write this number down
+gcc --version
+```
+2. Build the cross-compile build container
+```shell
+docker build -f dockerfile -t magpie-cross .
+```
+3. Ensure the dev packages are installed on the pi. (Run on the pi)
+```shell
+# on the Pi
+sudo apt install libcamera-dev libopencv-dev libeigen3-dev
+```
+4. Update sync_pi_fs.sh to point to your raspberry pi and copy the sysroot from the pi to this machine:
+```shell
+mkdir -p pi-sysroot
+chmod +x sync_pi_fs.sh
+./sync_pi_fs.sh
+```
+5. Fix the symlink inside the tree by converting them to relative links
+```shell
+docker run --rm -v pi-sysroot:/sysroot magpie-cross \
+  symlinks -crv /sysroot
+```
+6. Update toolchain-pi.cmake if your architecture is different.
+Change this line:
+```cmake
+set(TRIPLE aarch64-linux-gnu)
+```
+7. Build the binary
+```shell
+chmod +x cross-compile-agent.sh
+./cross-compile-agent.sh
+```
 ### Bounding-box debug overlay
 The stream command poller understands two debug commands alongside `start`/`stop`: `bbox_on` and
 `bbox_off`. While the RTSP stream is running, `bbox_on` starts a WebSocket server that publishes the
